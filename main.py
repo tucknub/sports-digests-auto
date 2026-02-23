@@ -150,7 +150,7 @@ def run_nba():
 # === SCHEDULER (runs in background thread) ===
 def start_scheduler():
     scheduler = BlockingScheduler(timezone="US/Eastern")
-    scheduler.add_job(run_nba, 'cron', hour=10, minute=0)  # 2:52 PM ET daily
+    scheduler.add_job(run_nba, 'cron', hour=10, minute=0)  # 3:00 PM ET daily
     scheduler.start()
 
 # === KEEP-ALIVE WEB SERVER (required by Render) ===
