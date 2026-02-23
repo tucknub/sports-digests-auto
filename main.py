@@ -1,6 +1,5 @@
 import os
 import threading
-import time
 from datetime import datetime
 import requests
 from apscheduler.schedulers.blocking import BlockingScheduler
@@ -12,8 +11,8 @@ XAI_API_KEY = os.getenv("XAI_API_KEY")
 PRIVATE_WEBHOOK = os.getenv("DISCORD_PRIVATE_WEBHOOK")
 PUBLIC_WEBHOOK = os.getenv("DISCORD_PUBLIC_WEBHOOK")
 
-# === YOUR FULL V6.3 PROMPT (paste the entire thing here) ===
-NBA_PROMPT = """**GROK DAILY NBA MULTI-PROP BETTING DIGEST TASK (2025-26 SEASON) – GROK-ONLY EXECUTION – VERSION 6.3 (FINAL OPTIMIZED)**
+# === YOUR FULL V6.3 PROMPT (paste the entire block) ===
+NBA_PROMPT =  """**GROK DAILY NBA MULTI-PROP BETTING DIGEST TASK (2025-26 SEASON) – GROK-ONLY EXECUTION – VERSION 6.3 (FINAL OPTIMIZED)**
 
 Generate the definitive daily NBA player and team props betting digest for TODAY’S DATE (YYYY-MM-DD) covering all games on the slate. This is a predictive, entertainment-oriented tool built exclusively on public data via Grok-native tools. It incorporates every validated enhancement from OnBall%, WOWY, Lineup Synergies, Pace Adjustment, and DvP for maximum repeatable edge.
 
@@ -119,69 +118,55 @@ This is a predictive, entertainment-oriented tool based on public data and model
 - Projected impact: 60–67% hit rate on valid picks, +0.22 avg EV.
 - This is the complete, final, locked master task prompt. It represents the absolute maximum edge achievable with public data and Grok-native tools."""
 
-print(f"✅ Prompt loaded successfully – length: {len(NBA_PROMPT)} characters")
+def call_grok(prompt, date_str):
+    headers = {"Authorization": f"Bearer {XAI_API_KEY}", "Content-Type": "application/json"}
+    payload = {"model": "grok-4", "messages": [{"role": "user", "content": prompt.replace("TODAY’S DATE", date_str)}], "temperature": 0.3}
+    resp = requests.post("https://api.x.ai/v1/chat/completions", json=payload, headers=headers, timeout=180)
+    resp.raise_for_status()
+    return resp.json()["choices"][0]["message"]["content"]
 
-def call_grok(prompt, date_str, attempt=1):
-    try:
-        print(f"🔄 API call attempt {attempt}/3...")
-        headers = {"Authorization": f"Bearer {XAI_API_KEY}", "Content-Type": "application/json"}
-        payload = {"model": "grok-4", "messages": [{"role": "user", "content": prompt.replace("TODAY’S DATE", date_str)}], "temperature": 0.3}
-        resp = requests.post("https://api.x.ai/v1/chat/completions", json=payload, headers=headers, timeout=180)
-        resp.raise_for_status()
-        print("✅ Grok API call succeeded")
-        return resp.json()["choices"][0]["message"]["content"]
-    except Exception as e:
-        print(f"❌ API error on attempt {attempt}: {str(e)}")
-        if attempt < 3:
-            time.sleep(15)  # wait 15 seconds before retry
-            return call_grok(prompt, date_str, attempt + 1)
-        return f"API Error after 3 attempts: {str(e)}"
-
-def redact_for_public(text):
-    redacted = text.replace("databallr.com", "advanced analytics")
-    redacted = redacted.replace("@PropBomb", "sharp social consensus")
-    return redacted
+def split_message(text, max_length=1900):
+    """Split long messages for Discord"""
+    chunks = []
+    current = ""
+    for line in text.split('\n'):
+        if len(current) + len(line) + 1 > max_length:
+            chunks.append(current)
+            current = line
+        else:
+            current += "\n" + line if current else line
+    if current:
+        chunks.append(current)
+    return chunks
 
 def send_to_discord(webhook, content, title):
-    try:
-        payload = {"content": f"**{title} - {datetime.now().strftime('%Y-%m-%d %H:%M ET')}**\n\n{content[:1900]}"}
-        requests.post(webhook, json=payload, timeout=15)
-        print(f"✅ Posted to Discord: {title}")
-    except Exception as e:
-        print(f"❌ Discord send failed: {str(e)}")
+    chunks = split_message(content)
+    for i, chunk in enumerate(chunks):
+        prefix = f"**{title} - {datetime.now().strftime('%Y-%m-%d %H:%M ET')} (Part {i+1}/{len(chunks)})**\n\n"
+        payload = {"content": prefix + chunk}
+        requests.post(webhook, json=payload, timeout=10)
 
 def run_nba():
-    print("🚀 Starting NBA V6.3 digest run...")
     today = datetime.now().strftime("%Y-%m-%d")
     full_digest = call_grok(NBA_PROMPT, today)
-    
     send_to_discord(PRIVATE_WEBHOOK, full_digest, "NBA Internal Full Digest (All Sources)")
-    public_digest = redact_for_public(full_digest)
+    public_digest = full_digest.replace("databallr.com", "advanced analytics").replace("@PropBomb", "sharp social consensus")
     send_to_discord(PUBLIC_WEBHOOK, public_digest, "NBA Public Digest")
-    print("✅ NBA digest completed at", datetime.now())
 
-# Run immediately on every deploy (for testing)
-print("🔄 Running immediate test digest...")
+# Run immediately on startup for testing
 run_nba()
 
 # Daily scheduler at 10:00 AM ET
 def start_scheduler():
     scheduler = BlockingScheduler(timezone="US/Eastern")
     scheduler.add_job(run_nba, 'cron', hour=10, minute=0)
-    print("⏰ Daily scheduler active – next run at 10:00 AM ET")
     scheduler.start()
 
 threading.Thread(target=start_scheduler, daemon=True).start()
 
-# Keep-alive for Render
 @app.route("/")
 def home():
-    return f"Sports Digest Scheduler running – last check {datetime.now().strftime('%H:%M ET')}"
-
-@app.route("/run")
-def manual_run():
-    run_nba()
-    return "Manual run triggered – check Discord!"
+    return "Sports Digest Scheduler is running..."
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
