@@ -1,5 +1,6 @@
 import os
 import threading
+import time
 from datetime import datetime
 import requests
 from apscheduler.schedulers.blocking import BlockingScheduler
@@ -7,78 +8,180 @@ from flask import Flask
 
 app = Flask(__name__)
 
-# Load prompt from separate file (safer for long prompt)
-with open("nba_prompt.txt", "r", encoding="utf-8") as f:
-    NBA_PROMPT = f.read()
-
-print("✅ Prompt loaded successfully")
-
 XAI_API_KEY = os.getenv("XAI_API_KEY")
 PRIVATE_WEBHOOK = os.getenv("DISCORD_PRIVATE_WEBHOOK")
 PUBLIC_WEBHOOK = os.getenv("DISCORD_PUBLIC_WEBHOOK")
 
-def call_grok(prompt, date_str):
+# === YOUR FULL V6.3 PROMPT (paste the entire thing here) ===
+NBA_PROMPT = """**GROK DAILY NBA MULTI-PROP BETTING DIGEST TASK (2025-26 SEASON) – GROK-ONLY EXECUTION – VERSION 6.3 (FINAL OPTIMIZED)**
+
+Generate the definitive daily NBA player and team props betting digest for TODAY’S DATE (YYYY-MM-DD) covering all games on the slate. This is a predictive, entertainment-oriented tool built exclusively on public data via Grok-native tools. It incorporates every validated enhancement from OnBall%, WOWY, Lineup Synergies, Pace Adjustment, and DvP for maximum repeatable edge.
+
+**Prop Categories (Seven Dedicated Sections – No Overlap or Redundancy)**
+1. Points Props
+2. Rebounds Props
+3. Assists Props
+4. 3-Pointers Made Props
+5. PRA Props
+6. Double-Double / Triple-Double Props
+7. Team Props (Team Total Points Per Quarter + Game Total Over/Under)
+
+**Core Constraints & Execution Workflow (Fully Automated)**
+- Slate Confirmation: browse_page(nba.com/schedule?date=YYYY-MM-DD) or espn.com/nba/schedule/_/date/YYYYMMDD; fallback web_search + basketball-reference.com.
+- Social Signals: x_keyword_search on verified panel (@PropBomb, @CodyBrownBets, @vsaaauce, @ThePropAnt, @925_Sports, @homerunpredict, @FanDuelResearch, @TPB_NBAProps, @AngeloProps, @propsdotcash, @Stuckey2, @KBProps) since 03:00 ET. Secondary: x_keyword_search("#NBAProps OR #PlayerProps OR #NBAPlayerProps min_faves:50 since:YYYY-MM-DD"). x_semantic_search for sharp consensus.
+- Image Validation: view_image on all media URLs (especially @homerunpredict graphics, lineup cards, projection tables). Extract and weight probabilities/tables.
+- Lineups / Injuries / Projected Minutes: browse_page(rotowire.com/nba/daily-lineups, nba.com, fantasypros.com/injuries).
+- Odds: browse_page(FanDuel, DraftKings, Bet365, Caesars, bettingpros.com/nba/props, covers.com/nba/player-props). Auto line-shop across minimum four books → record “Best Odds Shopped”.
+- Metrics: nba.com/stats, basketball-reference.com, cleaningtheglass.com, databallr.com (OnBall%, WOWY, Stat Line Shift, Matchup Matrix) + L10 rolling.
+- **Mandatory Databallr Extraction (every run)**: browse_page on https://databallr.com/wowy (league and key lineups), https://databallr.com/StatLineShift (player-specific), https://databallr.com/matchups (primary matchups), and relevant player/team dashboard pages. Extract and weight OnBall%, WOWY differentials, synergies, Stat Line Shift.
+- Model Execution: code_execution for ensemble regression (Poisson for scoring/3PM, usage/DvP/WOWY regression for PRA/doubles). Report RMSE/MAE from 2025-26 backtest. Derive Model Prob % (weighted: BettingPros/Covers 30%, social-verified + view_image 30%, L10/BvP/WOWY/synergies/databallr 40% when full data extracted).
+
+**Power-Value Score (Max 40 per Prop – Tailored Thresholds)**
+**Base Metrics (0–30)** – Customized per category
+- Points / 3PM: L10 vs line (8/6/4/2), Season avg adj (6/4/2/1), Opp Def to Pos (8/6/4/-1), Usage L10 (+3/2/1), Min proj (+3/2/1), Streak (+3/2/1), Edge (+2)
+- Rebounds / Assists: Analogous with rebound/assist rate emphasis
+- PRA / Double-Double / Triple-Double: L10 combo vs line, season PRA avg, opp defensive metrics, usage, minutes, streak, BvP, @homerunpredict projection boost (+2 if verified via view_image)
+
+**Environmental & Market Bonuses (max +10)**
+- Rest / No B2B: +2
+- Pace / matchup boost: +1–2 (Pace Delta validated)
+- Injury / usage edge: +1
+- Efficiency L10: +1
+- BvP strong: +1
+- Market inefficiency (≥18% delta after line shopping): +4
+- Social consensus (1 pt per verified account, max +4; +0.5 per high-engagement hashtag post, max +2)
+- Sentiment Boost (max +2): +1 for ≥3 sharp mentions; +1 for positive Reddit consensus (web_search site:reddit.com/r/sportsbook OR r/nba)
+- OnBall% / WOWY / Synergy Edge: +2 (databallr-validated usage/WOWY differential ≥+5 net rating or ≥5% OnBall%/usage spike)
+- DvP Edge: +2 to +4 (opponent ranks top-8 worst vs player’s primary position)
+
+**Thresholds**
+- Valid Pick: ≥20
+- Lock: ≥26 + streak + BvP
+- Consensus Lock: ≥3 sources align (social + view_image)
+- Value: Odds >+150 (or strong Under) & ≥20
+- Longshot: 16–19 & odds ≥+200 (or alt lines)
+
+**Output Structure**
+**NBA Player Props Digest – [TODAY’S DATE] (Full Slate)**
+**Overall Play of the Day / Value of the Day / Top Locks / Consensus Locks** (top 3–4 across all categories)
+
+**1. Points Props**
+| Player | Team | Opponent | Line | Side | Odds | Best Odds Shopped | Proj Min / OnBall% | Pace Delta | Opp DvP Rank | Score | Model Prob % | EV % | Projected Edge % | Sources | Tags | Notes |
+(Same columns for Rebounds, Assists, 3-Pointers Made, PRA, Double-Double / Triple-Double)
+
+**7. Team Props**
+| Team | Opponent | Quarter / Game | Line | Side | Odds | Best Odds Shopped | Pace Delta | Score | Model Prob % | EV % | Projected Edge % | Sources | Tags | Notes |
+
+**Databallr Advanced Insights**
+| Player | Key Metric | Value | Edge vs League Avg | Impact on Score | Notes |
+
+**Alt Line & Ladder Highlights** (across all player prop categories)
+| Player | Category | Alt Line / Ladder | Side | Odds | Best Odds Shopped | Score | Model Prob % | EV % | Projected Edge % | Sources | Tags | Notes |
+(Include only legs with EV ≥+0.21 and Score ≥20, e.g., 3PM ladders, Rebounds ladders, Assists ladders, PRA ladders, etc.)
+
+**Notes** (per section, ≤50 words): Top 3 drivers + summary sentence. Include sentiment consensus, “OnBall% Spike Alert”, “WOWY / Synergy Alert”, “Pace-Up/Down Alert”, “DvP Edge Alert”, “High-EV Ladder Alert” where applicable.
+
+**Slate Projection Footer**
+Projected hits from Score ≥20: X.X–X.X (10,000-iteration Monte Carlo ensemble via code_execution; simulated hit rate XX%).
+
+**Correlated Stacks / Same-Game Parlay Note**
+Recommended SGPs with combined model prob and EV (include ladders/alt lines only when EV ≥+0.21).
+
+**Historical Performance (YTD)**
+2025-26 hit rate on Score ≥20 / ROI by category / avg CLV (updated weekly via code_execution).
+
+**Data Sources Used (Transparency Footer)**
+- Exact x_keyword_search / x_semantic_search queries + qualifying posts summary
+- view_image extractions (tables/probabilities)
+- code_execution regression output (RMSE/MAE, ensemble weights)
+- databallr.com (OnBall%, WOWY, synergies, Stat Line Shift, Matchup Matrix) with specific pages accessed, cleaningtheglass.com, hashtagbasketball.com / bettingpros.com (DvP), basketball-reference.com (pace), primary odds/metrics sites with exact timestamps (post-03:00 ET)
+
+**Tag Legend**
+✅ Valid 💰 Value 🎯 Play of the Day 🔒 Lock Consensus Lock 🟢 Environment 🌐 Market Edge 🌪️ Arbitrage
+
+**Deliverables**
+- Top tables only (Score ≥20, sorted descending by Score)
+- Play of the Day / Value of the Day / Locks / Longshots / Alt-Line highlights
+- Databallr Advanced Insights
+- Alt Line & Ladder Highlights
+- Correlated stacks
+- Full disclaimer + bankroll guidance (0.5–1.0% per core pick, Kelly capped at 25% of edge)
+
+**No-Pick Scenario**: “No confident picks today” if none ≥20.
+
+**Disclaimer**
+This is a predictive, entertainment-oriented tool based on public data and model estimates. It is not financial advice. Always verify current odds and lineups. Gamble responsibly: 18+. Responsible gambling resources at rg.org.
+
+**Version 6.3 Notes (All Additions & Revisions)**
+- Maximum Databallr utilization on every run with explicit page targets, increased model weighting (40%), and dedicated output subsection.
+- Full systematic Alt Line & Ladder Highlights across all categories (Points, Rebounds, Assists, 3PM, PRA, Doubles).
+- Full alignment with CBB V5.0 / Soccer V3.0 / PGA V6.1 / UFC V5.0.
+- Projected impact: 60–67% hit rate on valid picks, +0.22 avg EV.
+- This is the complete, final, locked master task prompt. It represents the absolute maximum edge achievable with public data and Grok-native tools."""
+
+print(f"✅ Prompt loaded successfully – length: {len(NBA_PROMPT)} characters")
+
+def call_grok(prompt, date_str, attempt=1):
     try:
+        print(f"🔄 API call attempt {attempt}/3...")
         headers = {"Authorization": f"Bearer {XAI_API_KEY}", "Content-Type": "application/json"}
         payload = {"model": "grok-4", "messages": [{"role": "user", "content": prompt.replace("TODAY’S DATE", date_str)}], "temperature": 0.3}
-        resp = requests.post("https://api.x.ai/v1/chat/completions", json=payload, headers=headers, timeout=60)
+        resp = requests.post("https://api.x.ai/v1/chat/completions", json=payload, headers=headers, timeout=180)
         resp.raise_for_status()
+        print("✅ Grok API call succeeded")
         return resp.json()["choices"][0]["message"]["content"]
     except Exception as e:
-        print(f"❌ API Error: {str(e)}")
-        return f"API Error: {str(e)}"
+        print(f"❌ API error on attempt {attempt}: {str(e)}")
+        if attempt < 3:
+            time.sleep(15)  # wait 15 seconds before retry
+            return call_grok(prompt, date_str, attempt + 1)
+        return f"API Error after 3 attempts: {str(e)}"
 
 def redact_for_public(text):
     redacted = text.replace("databallr.com", "advanced analytics")
     redacted = redacted.replace("@PropBomb", "sharp social consensus")
-    # Add more replacements if you see specific handles in logs
     return redacted
 
 def send_to_discord(webhook, content, title):
-    payload = {"content": f"**{title} - {datetime.now().strftime('%Y-%m-%d %H:%M')}**\n\n{content[:1900]}"}
     try:
-        requests.post(webhook, json=payload, timeout=10)
-        print(f"✅ Sent to Discord: {title}")
+        payload = {"content": f"**{title} - {datetime.now().strftime('%Y-%m-%d %H:%M ET')}**\n\n{content[:1900]}"}
+        requests.post(webhook, json=payload, timeout=15)
+        print(f"✅ Posted to Discord: {title}")
     except Exception as e:
-        print(f"❌ Discord send error: {str(e)}")
+        print(f"❌ Discord send failed: {str(e)}")
 
 def run_nba():
-    print("🚀 Running NBA digest now...")
+    print("🚀 Starting NBA V6.3 digest run...")
     today = datetime.now().strftime("%Y-%m-%d")
     full_digest = call_grok(NBA_PROMPT, today)
     
-    # Internal full version
-    send_to_discord(PRIVATE_WEBHOOK, full_digest, "NBA Internal Full Digest")
-    
-    # Public redacted version
+    send_to_discord(PRIVATE_WEBHOOK, full_digest, "NBA Internal Full Digest (All Sources)")
     public_digest = redact_for_public(full_digest)
     send_to_discord(PUBLIC_WEBHOOK, public_digest, "NBA Public Digest")
-    
-    print("✅ NBA digest completed and posted at", datetime.now())
+    print("✅ NBA digest completed at", datetime.now())
 
-# Run immediately on startup (for testing)
+# Run immediately on every deploy (for testing)
 print("🔄 Running immediate test digest...")
 run_nba()
 
-# Scheduler for daily 10 AM ET
+# Daily scheduler at 10:00 AM ET
 def start_scheduler():
     scheduler = BlockingScheduler(timezone="US/Eastern")
     scheduler.add_job(run_nba, 'cron', hour=10, minute=0)
-    print("⏰ Scheduler started – next run at 10:00 AM ET daily")
+    print("⏰ Daily scheduler active – next run at 10:00 AM ET")
     scheduler.start()
 
-# Start scheduler in background
 threading.Thread(target=start_scheduler, daemon=True).start()
 
-# Keep-alive server for Render
+# Keep-alive for Render
 @app.route("/")
 def home():
-    return "Sports Digest Scheduler is running... (last check: " + datetime.now().strftime("%H:%M") + ")"
+    return f"Sports Digest Scheduler running – last check {datetime.now().strftime('%H:%M ET')}"
 
 @app.route("/run")
 def manual_run():
     run_nba()
-    return "NBA digest triggered manually – check Discord!"
+    return "Manual run triggered – check Discord!"
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
